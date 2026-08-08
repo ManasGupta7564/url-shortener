@@ -3,10 +3,12 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import string
 import secrets
+from database import SessionLocal
+from models import URL
 
 app = FastAPI()
 
-url_database = {}
+
 
 
 class URLRequest(BaseModel):
@@ -25,9 +27,19 @@ def home():
 
 @app.post("/shorten")
 def shorten_url(request: URLRequest):
+    db = SessionLocal()
+
     short_code = generate_short_code()
 
-    url_database[short_code] = request.url
+    new_url = URL(
+        short_code=short_code,
+        original_url=request.url
+    )
+
+    db.add(new_url)
+    db.commit()
+
+    db.close()
 
     return {
         "short_url": short_code
@@ -36,9 +48,16 @@ def shorten_url(request: URLRequest):
 
 @app.get("/{short_code}")
 def redirect_url(short_code: str):
-    original_url = url_database.get(short_code)
+    db = SessionLocal()
 
-    if original_url is None:
-        raise HTTPException(status_code=404, detail="Short URL not found")
+    url = db.query(URL).filter(URL.short_code == short_code).first()
 
-    return RedirectResponse(url=original_url)
+    db.close()
+
+    if url is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Short URL not found"
+        )
+
+    return RedirectResponse(url=url.original_url)
