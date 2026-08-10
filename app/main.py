@@ -6,6 +6,8 @@ import secrets
 from app.database import SessionLocal, get_db
 from app.models import URL
 from sqlalchemy.orm import Session
+from app.redis_client import redis_client
+
 app = FastAPI()
 
 
@@ -50,6 +52,13 @@ def redirect_url(
     short_code: str,
     db: Session = Depends(get_db)
 ):
+    # 1. Check Redis
+    cached_url = redis_client.get(short_code)
+
+    if cached_url:
+        return RedirectResponse(url=cached_url)
+
+    # 2. Cache miss → check PostgreSQL
     url = db.query(URL).filter(
         URL.short_code == short_code
     ).first()
@@ -60,4 +69,12 @@ def redirect_url(
             detail="Short URL not found"
         )
 
+    # 3. Store the result in Redis
+    redis_client.set(
+    short_code,
+    url.original_url,
+    ex=3600
+)
+
+    # 4. Redirect
     return RedirectResponse(url=url.original_url)
