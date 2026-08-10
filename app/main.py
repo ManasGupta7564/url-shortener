@@ -1,11 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import string
 import secrets
-from database import SessionLocal
-from models import URL
-
+from app.database import SessionLocal, get_db
+from app.models import URL
+from sqlalchemy.orm import Session
 app = FastAPI()
 
 
@@ -26,9 +26,10 @@ def home():
 
 
 @app.post("/shorten")
-def shorten_url(request: URLRequest):
-    db = SessionLocal()
-
+def shorten_url(
+    request: URLRequest,
+    db: Session = Depends(get_db)
+):
     short_code = generate_short_code()
 
     new_url = URL(
@@ -39,20 +40,19 @@ def shorten_url(request: URLRequest):
     db.add(new_url)
     db.commit()
 
-    db.close()
-
     return {
         "short_url": short_code
     }
 
 
 @app.get("/{short_code}")
-def redirect_url(short_code: str):
-    db = SessionLocal()
-
-    url = db.query(URL).filter(URL.short_code == short_code).first()
-
-    db.close()
+def redirect_url(
+    short_code: str,
+    db: Session = Depends(get_db)
+):
+    url = db.query(URL).filter(
+        URL.short_code == short_code
+    ).first()
 
     if url is None:
         raise HTTPException(
