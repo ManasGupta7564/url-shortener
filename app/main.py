@@ -1,14 +1,15 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends,BackgroundTasks,Request
 from fastapi.responses import RedirectResponse
+
 from pydantic import BaseModel
 import string
 import secrets
 from app.database import SessionLocal, get_db
-from app.models import URL
+from app.models import URL,Click
 from sqlalchemy.orm import Session
 from app.redis_client import redis_client
 from sqlalchemy.exc import IntegrityError
-
+import json
 app = FastAPI()
 
 
@@ -54,18 +55,51 @@ def shorten_url(
         "short_url": short_code
     }
 
+def record_click(
+    url_id: int,
+    referrer: str | None,
+    user_agent: str | None
+):
+    db = SessionLocal()
+
+    try:
+        click = Click(
+            url_id=url_id,
+            referrer=referrer,
+            user_agent=user_agent
+        )
+
+        db.add(click)
+        db.commit()
+
+    finally:
+        db.close()
+
 @app.get("/{short_code}")
 def redirect_url(
     short_code: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     # 1. Check Redis
-    cached_url = redis_client.get(short_code)
+    cached_data = redis_client.get(short_code)
 
-    if cached_url:
-        return RedirectResponse(url=cached_url)
+    if cached_data:
+        data = json.loads(cached_data)
 
-    # 2. Cache miss → check PostgreSQL
+        background_tasks.add_task(
+            record_click,
+            data["url_id"],
+            request.headers.get("referer"),
+            request.headers.get("user-agent")
+        )
+
+        return RedirectResponse(
+            url=data["original_url"]
+        )
+
+    # 2. Redis MISS → PostgreSQL
     url = db.query(URL).filter(
         URL.short_code == short_code
     ).first()
@@ -76,12 +110,27 @@ def redirect_url(
             detail="Short URL not found"
         )
 
-    # 3. Store the result in Redis
-    redis_client.set(
-    short_code,
-    url.original_url,
-    ex=3600
-)
+    # 3. Store URL data in Redis
+    cache_data = {
+        "url_id": url.id,
+        "original_url": url.original_url
+    }
 
-    # 4. Redirect
-    return RedirectResponse(url=url.original_url)
+    redis_client.set(
+        short_code,
+        json.dumps(cache_data),
+        ex=3600
+    )
+
+    # 4. Record analytics
+    background_tasks.add_task(
+        record_click,
+        url.id,
+        request.headers.get("referer"),
+        request.headers.get("user-agent")
+    )
+
+    # 5. Redirect
+    return RedirectResponse(
+        url=url.original_url
+    )
