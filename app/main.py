@@ -7,6 +7,7 @@ from app.database import SessionLocal, get_db
 from app.models import URL
 from sqlalchemy.orm import Session
 from app.redis_client import redis_client
+from sqlalchemy.exc import IntegrityError
 
 app = FastAPI()
 
@@ -32,20 +33,26 @@ def shorten_url(
     request: URLRequest,
     db: Session = Depends(get_db)
 ):
-    short_code = generate_short_code()
+    while True:
+        short_code = generate_short_code()
 
-    new_url = URL(
-        short_code=short_code,
-        original_url=request.url
-    )
+        new_url = URL(
+            short_code=short_code,
+            original_url=request.url
+        )
 
-    db.add(new_url)
-    db.commit()
+        db.add(new_url)
+
+        try:
+            db.commit()
+            break
+
+        except IntegrityError:
+            db.rollback()
 
     return {
         "short_url": short_code
     }
-
 
 @app.get("/{short_code}")
 def redirect_url(
