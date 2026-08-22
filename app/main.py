@@ -75,6 +75,48 @@ def record_click(
     finally:
         db.close()
 
+
+@app.get("/analytics/{short_code}")
+
+def get_analytics(
+
+    short_code: str,
+
+    db: Session = Depends(get_db)
+
+):
+
+    url = db.query(URL).filter(
+
+        URL.short_code == short_code
+
+    ).first()
+
+    if url is None:
+
+        raise HTTPException(
+
+            status_code=404,
+
+            detail="Short URL not found"
+
+        )
+
+    total_clicks = db.query(Click).filter(
+
+        Click.url_id == url.id
+
+    ).count()
+
+    return {
+
+        "short_code": url.short_code,
+
+        "total_clicks": total_clicks
+
+    }
+
+
 @app.get("/{short_code}")
 def redirect_url(
     short_code: str,
@@ -134,3 +176,4 @@ def redirect_url(
     return RedirectResponse(
         url=url.original_url
     )
+
