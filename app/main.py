@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends,BackgroundTasks,Request
 from fastapi.responses import RedirectResponse
-
+from sqlalchemy import func
 from pydantic import BaseModel
 import string
 import secrets
@@ -77,45 +77,48 @@ def record_click(
 
 
 @app.get("/analytics/{short_code}")
-
 def get_analytics(
-
     short_code: str,
-
     db: Session = Depends(get_db)
-
 ):
-
     url = db.query(URL).filter(
-
         URL.short_code == short_code
-
     ).first()
 
     if url is None:
-
         raise HTTPException(
-
             status_code=404,
-
             detail="Short URL not found"
-
         )
 
     total_clicks = db.query(Click).filter(
-
         Click.url_id == url.id
-
     ).count()
 
+    clicks_by_day = (
+        db.query(
+            func.date(Click.clicked_at).label("date"),
+            func.count(Click.id).label("clicks")
+        )
+        .filter(Click.url_id == url.id)
+        .group_by(func.date(Click.clicked_at))
+        .order_by(func.date(Click.clicked_at))
+        .all()
+    )
+
+    daily_clicks = [
+        {
+            "date": str(row.date),
+            "clicks": row.clicks
+        }
+        for row in clicks_by_day
+    ]
+
     return {
-
         "short_code": url.short_code,
-
-        "total_clicks": total_clicks
-
+        "total_clicks": total_clicks,
+        "clicks_by_day": daily_clicks
     }
-
 
 @app.get("/{short_code}")
 def redirect_url(
