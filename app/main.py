@@ -105,7 +105,26 @@ def get_analytics(
         .order_by(func.date(Click.clicked_at))
         .all()
     )
-
+    referrer_stats = (
+    db.query(
+        Click.referrer,
+        func.count(Click.id).label("clicks")
+    )
+    .filter(
+        Click.url_id == url.id,
+        Click.referrer.isnot(None)
+    )
+    .group_by(Click.referrer)
+    .order_by(func.count(Click.id).desc())
+    .all()
+    )
+    top_referrers = [
+    {
+        "referrer": row.referrer,
+        "clicks": row.clicks
+    }
+    for row in referrer_stats
+    ]
     daily_clicks = [
         {
             "date": str(row.date),
@@ -113,11 +132,33 @@ def get_analytics(
         }
         for row in clicks_by_day
     ]
+    user_agent_stats = (
+    db.query(
+        Click.user_agent,
+        func.count(Click.id).label("clicks")
+    )
+    .filter(
+        Click.url_id == url.id,
+        Click.user_agent.isnot(None)
+    )
+    .group_by(Click.user_agent)
+    .order_by(func.count(Click.id).desc())
+    .all()
+    )
+    user_agents = [
+    {
+        "user_agent": row.user_agent,
+        "clicks": row.clicks
+    }
+    for row in user_agent_stats
+    ]
 
     return {
         "short_code": url.short_code,
         "total_clicks": total_clicks,
-        "clicks_by_day": daily_clicks
+        "clicks_by_day": daily_clicks,
+        "top_referrers": top_referrers,
+        "user_agents": user_agents
     }
 
 @app.get("/{short_code}")
