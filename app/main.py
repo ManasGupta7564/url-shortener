@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.redis_client import redis_client
 from sqlalchemy.exc import IntegrityError
 import json
+from datetime import datetime, timedelta
+from typing import Optional
 app = FastAPI()
 
 
@@ -17,7 +19,7 @@ app = FastAPI()
 
 class URLRequest(BaseModel):
     url: str
-
+    expires_in: Optional[int] = None
 
 def generate_short_code(length=6):
     characters = string.ascii_letters + string.digits
@@ -37,9 +39,20 @@ def shorten_url(
     while True:
         short_code = generate_short_code()
 
+        expires_at = None
+
+        if request.expires_in is not None:
+
+            expires_at = datetime.now() + timedelta(
+
+                seconds=request.expires_in
+
+            )
+
         new_url = URL(
             short_code=short_code,
-            original_url=request.url
+            original_url=request.url,
+            expires_at=expires_at
         )
 
         db.add(new_url)
@@ -174,6 +187,17 @@ def redirect_url(
     if cached_data:
         data = json.loads(cached_data)
 
+        if data.get("expires_at"):
+            expires_at = datetime.fromisoformat(data["expires_at"])
+
+            if datetime.now() > expires_at:
+                redis_client.delete(short_code)
+
+                raise HTTPException(
+                    status_code=410,
+                    detail="This short URL has expired"
+                )
+
         background_tasks.add_task(
             record_click,
             data["url_id"],
@@ -195,17 +219,36 @@ def redirect_url(
             status_code=404,
             detail="Short URL not found"
         )
-
+    if url.expires_at is not None:
+        if datetime.now() > url.expires_at:
+            raise HTTPException(
+                status_code=410,
+                detail="This short URL has expired"
+            )
     # 3. Store URL data in Redis
     cache_data = {
         "url_id": url.id,
-        "original_url": url.original_url
+        "original_url": url.original_url,
+        "expires_at": (
+            url.expires_at.isoformat()
+            if url.expires_at
+            else None
+        )
     }
+
+    cache_ttl = 3600
+
+    if url.expires_at is not None:
+        remaining_seconds = int(
+            (url.expires_at - datetime.now()).total_seconds()
+        )
+
+        cache_ttl = min(cache_ttl, remaining_seconds)
 
     redis_client.set(
         short_code,
         json.dumps(cache_data),
-        ex=3600
+        ex=cache_ttl
     )
 
     # 4. Record analytics

@@ -10,7 +10,7 @@ class URL(Base):
     id = Column(Integer, primary_key=True, index=True)
     short_code = Column(String(10), unique=True, nullable=False, index=True)
     original_url = Column(Text, nullable=False)
-
+    expires_at = Column(DateTime, nullable=True)
 
 class Click(Base):
     __tablename__ = "clicks"
